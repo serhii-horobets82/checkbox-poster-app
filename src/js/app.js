@@ -9,6 +9,11 @@ import "babel-polyfill";
 const checkboxApiTest = "https://dev-api.checkbox.in.ua";
 const checkboxApiProd = "https://api.checkbox.ua";
 
+const defaultHeaders = [
+  `X-Client-Name:Poster app`,
+  `X-Client-Version:${version}`,
+];
+
 class CheckboxApp extends React.Component {
   constructor(props) {
     super(props);
@@ -31,6 +36,9 @@ class CheckboxApp extends React.Component {
       isProd: false,
       error: null,
       cashier: null,
+      cashRegister: null,
+      reportData: null,
+      textPreview: false,
     };
   }
 
@@ -46,37 +54,34 @@ class CheckboxApp extends React.Component {
       device = await Poster.devices.create({
         deviceClass: "platformOnlineFiscal",
       });
-      console.log("New device", device);
     }
     device.setOnline();
     device.setDefault();
 
-    let dev = await Poster.devices.get(device.id);
-    let result = await dev.setExtras("checkbox", {
-      licenseKey: "046cbd2be41bfe43245fa4c1",
-      pinCode: "9260012519",
-    });
-
-    console.log("set extras result", result);
-
-    device.onPrintFiscalReceipt(async (event) => {
-      console.log("onPrintFiscalReceipt111", event);
-      const { order, device } = event;
-      const extras = device.extras["checkbox"];
-      // console.log("extras", extras);
-
-      var result = await Poster.orders.setExtras(
-        order.id,
-        "checkbox",
-        JSON.stringify({
-          id: "1122",
-          fiscalCode: "dddd",
-        })
-      );
-
-      console.log(result);
+    device.onPrintFiscalReceipt(async (event, next) => {
+      console.log("onPrintFiscalReceipt", event);
+      const { order } = event;
 
       console.log("s", order.id, order.extras);
+
+      var result = await Poster.orders.setPrintText(
+        1635345606585,
+        "Hello guys\nI am a Lorem Ipsum"
+      );
+      console.log(result); // { success: true }
+
+      Poster.orders.printReceipt(
+        1635345606585,
+        "loremipsum 123",
+        "Для сканирования QR кода используйте приложение Приват24"
+      );
+
+      next({
+        errorCode: 0,
+        success: true,
+      });
+
+      return;
       const products = [];
       const discount =
         order.subtotal - order.total + (order.platformDiscount || 0);
@@ -131,33 +136,8 @@ class CheckboxApp extends React.Component {
       console.log("onPrintCashFlow", event);
     });
 
-    device.onPrintXReport((event, next) => {
-      console.log("onPrintXReport");
-      console.log("onPrintXReport", event);
-      const { device, data } = event;
-
-      const extras = device.extras["checkbox"];
-      console.log("extras", extras);
-
-      Poster.makeRequest(
-        "https://dev-api.checkbox.in.ua/api/v1/reports",
-        {
-          headers: [
-            "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiQVBJIiwianRpIjoiODQzOTNiNWQtZDFiZS00NWVjLTllZTItMWMyNzcwZmQwYmNhIiwic3ViIjoiZDliNDk1YmQtNzIyNS00YTNhLTllYTEtOTcxNzM4N2EyYjMyIiwibmJmIjoxNjM3Njk2NTI0LCJpYXQiOjE2Mzc2OTY1MjR9.fjo8Yv3PJrdCg6bZLMCTsvno9R-sRNBwijqS5-yH6_w",
-          ],
-          method: "post",
-          timeout: 10000,
-        },
-        (answer) => {
-          console.log("answer", answer);
-          if (answer && Number(answer.status) === 201) {
-            console.log(answer.result);
-          }
-        }
-      );
-      // let dev = Poster.devices.get(device.id);
-
-      //let dev = await Poster.devices.get(device.id);
+    device.onPrintXReport(async (event, next) => {
+      await this.getXReport();
 
       //   next({
       //     errorCode: -1,
@@ -169,8 +149,12 @@ class CheckboxApp extends React.Component {
         success: true,
       });
     });
-    device.onPrintZReport((event) => {
-      console.log("onPrintZReport", event);
+    device.onPrintZReport(async (event, next) => {
+      await this.getZReport();
+      next({
+        errorCode: 0,
+        success: true,
+      });
     });
     device.onPrintPeriodicReport((event) => {
       console.log("onPrintPeriodicReport", event);
@@ -231,12 +215,9 @@ class CheckboxApp extends React.Component {
       functions: "Checkbox пРРО",
     });
 
-    console.log("Poster", Poster);
-    console.log("Poster", Poster.settings);
-
     Poster.on("applicationIconClicked", this.onIconClick);
-    Poster.on("beforeOrderClose", this.beforeOrderClose);
-    Poster.on("afterOrderClose", this.afterOrderClose);
+    //Poster.on("beforeOrderClose", this.beforeOrderClose);
+    //Poster.on("afterOrderClose", this.afterOrderClose);
   }
 
   beforeOrderClose = (data, next) => {
@@ -298,11 +279,23 @@ class CheckboxApp extends React.Component {
     console.log("products", products);
   };
 
+  getToken = () => {
+    const extras = Poster.settings["extras"];
+    return extras["token"];
+  };
+
+  getLicenseKey = () => {
+    const extras = Poster.settings["extras"];
+    return extras["licenseKey"];
+  };
+
   onIconClick = async () => {
     this.getCashierInfo();
+    this.getCashRegisterInfo();
+    this.setState({ reportData: null, textPreview: false });
     Poster.interface.popup({
-      width: 500,
-      height: 400,
+      width: 600,
+      height: 600,
       title: `Checkbox app (${version})`,
     });
   };
@@ -315,19 +308,66 @@ class CheckboxApp extends React.Component {
     return this.state.isProd ? checkboxApiProd : checkboxApiTest;
   };
 
-  getToken = () => {
-    const extras = Poster.settings["extras"];
-    return extras["token"];
-  };
-
-  getCashierInfo = () => {
+  getXReport = async () => {
     const token = this.getToken();
     if (!token) return;
 
     Poster.makeRequest(
-      `${this.getApiServer()}/api/v1/cashier/me`,
+      `${this.getApiServer()}/api/v1/reports`,
       {
-        headers: [`Authorization: Bearer ${token}`],
+        headers: defaultHeaders.concat([`Authorization: Bearer ${token}`]),
+        method: "post",
+      },
+      (answer) => {
+        if (answer && Number(answer.code) !== 201) {
+          const { message } = JSON.parse(answer.result);
+          this.setState({ error: message });
+          Poster.interface.showNotification({
+            title: "Помилка",
+            message: message,
+          });
+        } else {
+          const data = JSON.parse(answer.result);
+          console.log("X report", data.id);
+          this.getReportById(data.id);
+        }
+      }
+    );
+  };
+
+  getZReport = async () => {
+    const token = this.getToken();
+    if (!token) return;
+
+    Poster.makeRequest(
+      `${this.getApiServer()}/api/v1/shifts/close`,
+      {
+        headers: defaultHeaders.concat([`Authorization: Bearer ${token}`]),
+        method: "post",
+      },
+      (answer) => {
+        console.log("Z report", answer);
+        if (answer && Number(answer.code) !== 201) {
+          const { message } = JSON.parse(answer.result);
+          this.setState({ error: message });
+          Poster.interface.showNotification({
+            title: "Помилка",
+            message: message,
+          });
+        } else {
+          const data = JSON.parse(answer.result);
+          console.log("Z report", data);
+          this.getReportById(data.report.id);
+        }
+      }
+    );
+  };
+
+  getReportById = async (id) => {
+    Poster.makeRequest(
+      `${this.getApiServer()}/api/v1/reports/${id}/text`,
+      {
+        headers: defaultHeaders,
         method: "get",
       },
       (answer) => {
@@ -337,12 +377,69 @@ class CheckboxApp extends React.Component {
           Poster.interface.showNotification({
             title: "Ошибка",
             message: message,
-            icon: "https://joinposter.com/upload/apps/icons/posterboss-ios.png",
+          });
+        } else {
+          console.log("Report data", answer.result);
+          this.setState({ reportData: answer.result, textPreview: true });
+          Poster.interface.popup({
+            width: 400,
+            height: 600,
+            title: `Друк звіту`,
+          });
+        }
+      }
+    );
+  };
+
+  getCashierInfo = () => {
+    const token = this.getToken();
+    if (!token) return;
+
+    Poster.makeRequest(
+      `${this.getApiServer()}/api/v1/cashier/me`,
+      {
+        headers: defaultHeaders.concat([`Authorization: Bearer ${token}`]),
+        method: "get",
+      },
+      (answer) => {
+        if (answer && Number(answer.code) !== 200) {
+          const { message } = JSON.parse(answer.result);
+          this.setState({ error: message });
+          Poster.interface.showNotification({
+            title: "Ошибка",
+            message: message,
           });
         } else {
           const data = JSON.parse(answer.result);
           console.log("Cashier info", data);
           this.setState({ cashier: data });
+        }
+      }
+    );
+  };
+
+  getCashRegisterInfo = () => {
+    const licenseKey = this.getLicenseKey();
+    if (!licenseKey) return;
+
+    Poster.makeRequest(
+      `${this.getApiServer()}/api/v1/cash-registers/info`,
+      {
+        headers: defaultHeaders.concat([`X-License-Key: ${licenseKey}`]),
+        method: "get",
+      },
+      (answer) => {
+        if (answer && Number(answer.code) !== 200) {
+          const { message } = JSON.parse(answer.result);
+          this.setState({ error: message });
+          Poster.interface.showNotification({
+            title: "Ошибка",
+            message: message,
+          });
+        } else {
+          const data = JSON.parse(answer.result);
+          console.log("Cash register info", data);
+          this.setState({ cashRegister: data });
         }
       }
     );
@@ -356,7 +453,7 @@ class CheckboxApp extends React.Component {
     Poster.makeRequest(
       `${this.getApiServer()}/api/v1/cashier/signinPinCode`,
       {
-        headers: [`X-License-Key: ${licenseKey}`],
+        headers: defaultHeaders.concat([`X-License-Key: ${licenseKey}`]),
         method: "post",
         processData: false,
         data: JSON.stringify({ pin_code: pinCode }),
@@ -388,6 +485,7 @@ class CheckboxApp extends React.Component {
             (response) => {
               const extras = Poster.settings["extras"];
               console.log("Checkbox extras ", response, extras);
+              this.getCashierInfo();
             }
           );
         }
@@ -404,89 +502,200 @@ class CheckboxApp extends React.Component {
     this.setState({ [id]: value });
   };
 
+  formatDate = (str) => {
+    if (str) {
+      return (
+        str.substring(8, 10) +
+        "/" +
+        str.substring(5, 7) +
+        "/" +
+        str.substring(0, 4)
+      );
+    }
+    return "";
+  };
+
+  printReport = async () => {
+    let printers = await Poster.devices.getAll({ type: "printer" });
+    if (!printers || printers.length === 0) {
+      Poster.interface.showNotification({
+        title: "Помилка",
+        message: "Не знайдено жодного принтеру для друку",
+      });
+    } else {
+      const { reportData } = this.state;
+      console.log("Print content", reportData, printers);
+      let result = await printers[0].printText({ text: reportData });
+      console.log("Print result", result);
+    }
+  };
+
   render() {
-    const { error, licenseKey, pinCode, isProd, cashier } = this.state;
+    const {
+      error,
+      licenseKey,
+      pinCode,
+      isProd,
+      cashier,
+      cashRegister,
+      textPreview,
+      reportData,
+    } = this.state;
+
+    if (textPreview) {
+      return (
+        <div>
+          <pre style={{ maxHeight: 500 }}>{reportData}</pre>
+
+          <div className="footer">
+            <div className="row">
+              <div className="col-xs-12">
+                <button
+                  className="btn btn-lg btn-success"
+                  onClick={this.printReport}
+                >
+                  Друкувати
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <form onSubmit={this.auth}>
         {/** using hidden input for IOS 9 input focus and onChange fix **/}
         <input type="hidden" />
 
-        <div className="row">
-          <div className="col-xs-3">
-            <label style={{ marginTop: 6 }}>Сервер</label>
-          </div>
-          <div className="col-xs-6">
-            <label style={{ marginTop: 6 }}>
-              {isProd ? checkboxApiProd : checkboxApiTest}
-            </label>
-          </div>
-          <div className="col-xs-3">
-            <input
-              type="checkbox"
-              id="apiSwitch"
-              name="apiSwitch"
-              style={{ zoom: 1.7, marginBottom: 6 }}
-              checked={!isProd}
-              onChange={this.toggleApiAddress}
-            />
-            <label
-              htmlFor="apiSwitch"
-              style={{ marginBottom: 10, marginLeft: 7 }}
-            >
-              Тест
-            </label>
-          </div>
-        </div>
-        <div className="row">
-          <div className="col-xs-3">
-            <label htmlFor="code btn btn-default" style={{ marginTop: 10 }}>
-              Ліцензія
-            </label>
-          </div>
-          <div className="col-xs-9">
-            <div className="input-group-lg">
-              <input
-                className="form-control"
-                type="text"
-                id="licenseKey"
-                onChange={this.updateInput}
-                value={licenseKey}
-              />
+        <div class="panel panel-info">
+          <div class="panel-heading">Налаштування підключення</div>
+          <div class="panel-body">
+            <div className="row">
+              <div className="col-xs-3">
+                <label style={{ marginTop: 6 }}>API сервер</label>
+              </div>
+              <div className="col-xs-7">
+                <label style={{ marginTop: 6 }}>
+                  {isProd ? checkboxApiProd : checkboxApiTest}
+                </label>
+              </div>
+              <div className="col-xs-2">
+                <input
+                  type="checkbox"
+                  id="apiSwitch"
+                  name="apiSwitch"
+                  style={{ zoom: 1.7, marginBottom: 6 }}
+                  checked={!isProd}
+                  onChange={this.toggleApiAddress}
+                />
+                <label
+                  htmlFor="apiSwitch"
+                  style={{ marginBottom: 10, marginLeft: 7 }}
+                >
+                  Тест
+                </label>
+              </div>
+            </div>
+            <div className="row">
+              <div className="col-xs-3">
+                <label htmlFor="code btn btn-default">Ліцензія</label>
+              </div>
+              <div className="col-xs-9">
+                <div>
+                  <input
+                    className="form-control"
+                    type="text"
+                    id="licenseKey"
+                    onChange={this.updateInput}
+                    value={licenseKey}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="row">
+              <div className="col-xs-3">
+                <label htmlFor="code btn btn-default">Пін-код</label>
+              </div>
+              <div className="col-xs-5">
+                <div>
+                  <input
+                    className="form-control"
+                    type="text"
+                    placeholder=""
+                    id="pinCode"
+                    onChange={this.updateInput}
+                    value={pinCode}
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="row">
-          <div className="col-xs-3">
-            <label htmlFor="code btn btn-default" style={{ marginTop: 10 }}>
-              Пін-код
-            </label>
-          </div>
-          <div className="col-xs-5">
-            <div className="input-group-lg">
-              <input
-                className="form-control"
-                type="text"
-                placeholder=""
-                id="pinCode"
-                onChange={this.updateInput}
-                value={pinCode}
-              />
-            </div>
-          </div>
-        </div>
         {cashier && (
-          <div className="row">
-            <div className="col-xs-3">
-              <label style={{ marginTop: 6 }}>Касир</label>
-            </div>
-            <div className="col-xs-6">
-              <label style={{ marginTop: 6 }}>{cashier.full_name}</label>
+          <div class="panel panel-info">
+            <div class="panel-heading">Інформація по касі</div>
+            <div class="panel-body">
+              <div className="row">
+                <div className="col-xs-3">
+                  <span>Касир</span>
+                </div>
+                <div className="col-xs-5">
+                  <label>{cashier.full_name}</label>
+                </div>
+                <div className="col-xs-4">
+                  <h5>
+                    Діє до:{" "}
+                    <label>{this.formatDate(cashier.certificate_end)}</label>
+                  </h5>
+                </div>
+              </div>
+              <div className="row">
+                <div className="col-xs-3">
+                  <span>Організація</span>
+                </div>
+                <div className="col-xs-5">
+                  <label>{cashier.organization.title}</label>
+                </div>
+                <div className="col-xs-4">
+                  <h5>
+                    ПН: <label>{cashier.organization.tax_number}</label>
+                  </h5>
+                </div>
+              </div>
+              {cashRegister && (
+                <div className="row">
+                  <div className="col-xs-3">
+                    <span>пРРО</span>
+                  </div>
+                  <div className="col-xs-5">
+                    <label>{cashRegister.title}</label>
+                  </div>
+                  <div className="col-xs-4">
+                    <h5>
+                      ФН: <label>{cashRegister.fiscal_number}</label>
+                    </h5>
+                  </div>
+                </div>
+              )}
+              {cashRegister && (
+                <div className="row">
+                  <div className="col-xs-3"> </div>
+                  <div className="col-xs-9">
+                    <h5>{cashRegister.address}</h5>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        {Boolean(error) && <span className="error-msg">{error}</span>}
+        {Boolean(error) && (
+          <div class="alert alert-danger" role="alert">
+            {error}
+          </div>
+        )}
         <div className="footer">
           <div className="row">
             <div className="col-xs-12">
