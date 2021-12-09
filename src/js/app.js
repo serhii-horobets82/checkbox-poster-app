@@ -19,7 +19,7 @@ class CheckboxApp extends React.Component {
     super(props);
     console.log("Checkbox app, version ", version);
 
-    let licenseKey;
+    let licenseKey; 
     let pinCode;
     const extras = Poster.settings["extras"];
     console.log("Checkbox extras ", extras);
@@ -61,73 +61,72 @@ class CheckboxApp extends React.Component {
     device.onPrintFiscalReceipt(async (event, next) => {
       console.log("onPrintFiscalReceipt", event);
       const { order } = event;
+      // TODO: Create checkbox receipt
+      console.log("order", order);
 
-      console.log("s", order.id, order.extras);
 
-      var result = await Poster.orders.setPrintText(
-        1635345606585,
-        "Hello guys\nI am a Lorem Ipsum"
-      );
-      console.log(result); // { success: true }
+      // next({
+      //   errorCode: 0,
+      //   success: true,
+      // });
 
-      Poster.orders.printReceipt(
-        1635345606585,
-        "loremipsum 123",
-        "Для сканирования QR кода используйте приложение Приват24"
-      );
+      // return;
+      // const products = [];
+      // const discount =
+      //   order.subtotal - order.total + (order.platformDiscount || 0);
 
+      // for (const i in Object.values(order.products)) {
+      //   const product = await Poster.products.getFullName(order.products[i]);
+      //   const model = await Poster.products.get(product.id);
+      //   // If discount applied to the order we should calculate price with discount
+      //   if (product.promotionPrice !== undefined) {
+      //     product.price = product.promotionPrice;
+      //   }
+
+      //   // Вычитаем скидку на заказ
+      //   product.price -= (product.price / order.subtotal) * discount;
+      //   product.tax = 0;
+
+      //   // Here we will calculate total tax value, but product price will be only for 1 item
+      //   // E.g. for 2 donuts price field will contain 1 donut price and tax field will contain whole taxes sum for 2 donuts
+
+      //   // Calculate Sales Tax
+      //   if (model.taxType === 1 && model.taxValue) {
+      //     product.tax = (product.price * model.taxValue) / 100;
+      //   }
+
+      //   // Calculate VAT. VAT already included in price so we have to subtract it
+      //   if (model.taxType === 3 && model.taxValue) {
+      //     product.tax =
+      //       product.price - product.price / (1 + model.taxValue / 100);
+      //     product.price -= product.tax;
+      //   }
+
+      //   // Calculate tax on turnover
+      //   if (model.taxType === 2 && model.taxValue) {
+      //     product.tax = (product.price * model.taxValue) / 100;
+      //     product.price -= product.tax;
+      //   }
+
+      //   if (product.tax !== undefined) {
+      //     product.tax *= product.count;
+      //     product.taxName = model.taxName;
+      //   }
+
+      //   products.push(product);
+      // }
+
+
+
+      //   next({
+      //     errorCode: -1,
+      //     errorText: 'Текст ошибки',
+      //     success: false,
+      // });
       next({
         errorCode: 0,
         success: true,
       });
-
-      return;
-      const products = [];
-      const discount =
-        order.subtotal - order.total + (order.platformDiscount || 0);
-
-      for (const i in Object.values(order.products)) {
-        const product = await Poster.products.getFullName(order.products[i]);
-        const model = await Poster.products.get(product.id);
-        // If discount applied to the order we should calculate price with discount
-        if (product.promotionPrice !== undefined) {
-          product.price = product.promotionPrice;
-        }
-
-        // Вычитаем скидку на заказ
-        product.price -= (product.price / order.subtotal) * discount;
-        product.tax = 0;
-
-        // Here we will calculate total tax value, but product price will be only for 1 item
-        // E.g. for 2 donuts price field will contain 1 donut price and tax field will contain whole taxes sum for 2 donuts
-
-        // Calculate Sales Tax
-        if (model.taxType === 1 && model.taxValue) {
-          product.tax = (product.price * model.taxValue) / 100;
-        }
-
-        // Calculate VAT. VAT already included in price so we have to subtract it
-        if (model.taxType === 3 && model.taxValue) {
-          product.tax =
-            product.price - product.price / (1 + model.taxValue / 100);
-          product.price -= product.tax;
-        }
-
-        // Calculate tax on turnover
-        if (model.taxType === 2 && model.taxValue) {
-          product.tax = (product.price * model.taxValue) / 100;
-          product.price -= product.tax;
-        }
-
-        if (product.tax !== undefined) {
-          product.tax *= product.count;
-          product.taxName = model.taxName;
-        }
-
-        products.push(product);
-      }
-
-      console.log("products", products);
     });
     device.onPrintNonFiscal((event) => {
       console.log("onPrintNonFiscal", event);
@@ -149,6 +148,7 @@ class CheckboxApp extends React.Component {
         success: true,
       });
     });
+
     device.onPrintZReport(async (event, next) => {
       await this.getZReport();
       next({
@@ -156,6 +156,7 @@ class CheckboxApp extends React.Component {
         success: true,
       });
     });
+    /*
     device.onPrintPeriodicReport((event) => {
       console.log("onPrintPeriodicReport", event);
     });
@@ -203,7 +204,7 @@ class CheckboxApp extends React.Component {
     });
     device.onIsFiscalBlocked((event) => {
       console.log("onIsFiscalBlocked", event);
-    });
+    });*/
 
     this.setState({ device: device });
   };
@@ -216,8 +217,19 @@ class CheckboxApp extends React.Component {
     });
 
     Poster.on("applicationIconClicked", this.onIconClick);
+    Poster.on('shiftOpen', this.onShiftOpen);
+    Poster.on('shiftClose', this.onShiftClose);
     //Poster.on("beforeOrderClose", this.beforeOrderClose);
     //Poster.on("afterOrderClose", this.afterOrderClose);
+  }
+
+  onShiftOpen = () => {
+    console.log("Open shift");
+    this.openShift();
+  }
+
+  onShiftClose = () => {
+    console.log("Close shift");
   }
 
   beforeOrderClose = (data, next) => {
@@ -347,7 +359,7 @@ class CheckboxApp extends React.Component {
       },
       (answer) => {
         console.log("Z report", answer);
-        if (answer && Number(answer.code) !== 201) {
+        if (answer && Number(answer.code) !== 202) {
           const { message } = JSON.parse(answer.result);
           this.setState({ error: message });
           Poster.interface.showNotification({
@@ -357,6 +369,36 @@ class CheckboxApp extends React.Component {
         } else {
           const data = JSON.parse(answer.result);
           console.log("Z report", data);
+          this.getReportById(data.z_report.id);
+        }
+      }
+    );
+  };
+
+  openShift = async () => {
+    const licenseKey = this.getLicenseKey();
+    if (!licenseKey) return;
+    const token = this.getToken();
+    if (!token) return;
+
+    Poster.makeRequest(
+      `${this.getApiServer()}/api/v1/shifts`,
+      {
+        headers: defaultHeaders.concat([`X-License-Key: ${licenseKey}`]).concat([`Authorization: Bearer ${token}`]),
+        method: "post",
+      },
+      (answer) => {
+        console.log("Open shift", answer);
+        if (answer && Number(answer.code) !== 202) {
+          const { message } = JSON.parse(answer.result);
+          this.setState({ error: message });
+          Poster.interface.showNotification({
+            title: "Помилка",
+            message: message,
+          });
+        } else {
+          const data = JSON.parse(answer.result);
+          console.log("New shift", data);
           this.getReportById(data.report.id);
         }
       }
