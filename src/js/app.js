@@ -148,6 +148,7 @@ class CheckboxApp extends React.Component {
         },
         (answer) => {
           if (answer && Number(answer.code) !== 201) {
+            console.log("Sell error:", answer)
             const { message } = JSON.parse(answer.result)
             this.setState({ error: message })
             Poster.interface.showNotification({
@@ -157,7 +158,7 @@ class CheckboxApp extends React.Component {
           } else {
             const data = JSON.parse(answer.result)
             console.log('Receipt data', data)
-            this.getReceiptView(data.id)
+            setTimeout(() => this.getReceiptView(data.id), 500)
           }
         }
       )
@@ -337,8 +338,8 @@ class CheckboxApp extends React.Component {
     this.getCashRegisterInfo()
     this.setState({ reportData: null, textPreview: false })
     Poster.interface.popup({
-      width: 600,
-      height: 600,
+      width: 700,
+      height: 700,
       title: `Checkbox app (${version})`
     })
   }
@@ -430,7 +431,7 @@ class CheckboxApp extends React.Component {
         } else {
           const data = JSON.parse(answer.result)
           console.log('New shift', data)
-          this.getReportById(data.report.id)
+          this.getReportById(data.id)
         }
       }
     )
