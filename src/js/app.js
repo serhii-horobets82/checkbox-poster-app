@@ -6,8 +6,7 @@ import { version } from '../../package.json'
 
 import 'babel-polyfill'
 
-const checkboxApiTest = 'https://dev-api.checkbox.in.ua'
-const checkboxApiProd = 'https://api.checkbox.ua'
+const checkboxApi = 'https://api.checkbox.ua'
 
 const defaultHeaders = [
   `X-Client-Name:Poster app`,
@@ -33,12 +32,13 @@ class CheckboxApp extends React.Component {
       device: null,
       licenseKey: licenseKey,
       pinCode: pinCode,
-      isProd: false,
       error: null,
       cashier: null,
       cashRegister: null,
       reportData: null,
-      textPreview: false
+      textPreview: false,
+      token: null,
+      showError: false
     }
   }
 
@@ -149,8 +149,14 @@ class CheckboxApp extends React.Component {
         (answer) => {
           if (answer && Number(answer.code) !== 201) {
             console.log("Sell error:", answer)
-            const { message } = JSON.parse(answer.result)
-            this.setState({ error: message })
+            const { message, detail } = JSON.parse(answer.result)
+            this.setState({ reportData: null, textPreview: false, showError: true, error: message + JSON.stringify(detail) })
+            Poster.interface.popup({
+              width: 700,
+              height: 300,
+              title: `Помилка фіскалізації`
+            })
+
             Poster.interface.showNotification({
               title: 'Помилка',
               message: message
@@ -324,7 +330,10 @@ class CheckboxApp extends React.Component {
   }
 
   getToken = () => {
+    if(this.state.token) 
+      return this.state.token
     const extras = Poster.settings['extras'] || []
+    
     return extras['token']
   }
 
@@ -336,7 +345,7 @@ class CheckboxApp extends React.Component {
   onIconClick = async () => {
     this.getCashierInfo()
     this.getCashRegisterInfo()
-    this.setState({ reportData: null, textPreview: false })
+    this.setState({ reportData: null, textPreview: false, showError: false, error: null })
     Poster.interface.popup({
       width: 700,
       height: 700,
@@ -349,7 +358,7 @@ class CheckboxApp extends React.Component {
   }
 
   getApiServer = () => {
-    return this.state.isProd ? checkboxApiProd : checkboxApiTest
+    return checkboxApi
   }
 
   getXReport = async () => {
@@ -454,7 +463,7 @@ class CheckboxApp extends React.Component {
           })
         } else {
           console.log('Report data', answer.result)
-          this.setState({ reportData: answer.result, textPreview: true })
+          this.setState({ reportData: answer.result, textPreview: true, showError: false })
           Poster.interface.popup({
             width: 400,
             height: 600,
@@ -482,7 +491,7 @@ class CheckboxApp extends React.Component {
           })
         } else {
           console.log('Receipt view data', answer)
-          this.setState({ reportData: answer.result, textPreview: true })
+          this.setState({ reportData: answer.result, textPreview: true, showError: false })
           Poster.interface.popup({
             width: 400,
             height: 600,
@@ -550,7 +559,6 @@ class CheckboxApp extends React.Component {
   auth = async (e) => {
     e.preventDefault()
     const { licenseKey, pinCode } = this.state
-
     // Auth
     Poster.makeRequest(
       `${this.getApiServer()}/api/v1/cashier/signinPinCode`,
@@ -567,7 +575,7 @@ class CheckboxApp extends React.Component {
           this.setState({ error: message, cashier: null })
         } else {
           const { access_token } = JSON.parse(answer.result)
-          this.setState({ error: null })
+          this.setState({ error: null, token: access_token })
 
           // save global settings
           Poster.makeApiRequest(
@@ -593,10 +601,6 @@ class CheckboxApp extends React.Component {
         }
       }
     )
-  }
-
-  toggleApiAddress = () => {
-    this.setState({ isProd: !this.state.isProd })
   }
 
   updateInput = (e) => {
@@ -637,11 +641,11 @@ class CheckboxApp extends React.Component {
       error,
       licenseKey,
       pinCode,
-      isProd,
       cashier,
       cashRegister,
       textPreview,
-      reportData
+      reportData,
+      showError
     } = this.state
 
     if (textPreview) {
@@ -665,6 +669,16 @@ class CheckboxApp extends React.Component {
       )
     }
 
+    if (showError) {
+      return (
+        <div>
+          <div className="alert alert-danger" role="alert">
+              {error}
+            </div>
+        </div>
+      )
+    }
+
     return (
       <form onSubmit={this.auth}>
         {/** using hidden input for IOS 9 input focus and onChange fix **/}
@@ -679,23 +693,7 @@ class CheckboxApp extends React.Component {
               </div>
               <div className="col-xs-7">
                 <label style={{ marginTop: 6 }}>
-                  {isProd ? checkboxApiProd : checkboxApiTest}
-                </label>
-              </div>
-              <div className="col-xs-2">
-                <input
-                  type="checkbox"
-                  id="apiSwitch"
-                  name="apiSwitch"
-                  style={{ zoom: 1.7, marginBottom: 6 }}
-                  checked={!isProd}
-                  onChange={this.toggleApiAddress}
-                />
-                <label
-                  htmlFor="apiSwitch"
-                  style={{ marginBottom: 10, marginLeft: 7 }}
-                >
-                  Тест
+                  {checkboxApi}
                 </label>
               </div>
             </div>
