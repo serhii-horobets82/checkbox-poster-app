@@ -61,10 +61,13 @@ class CheckboxApp extends React.Component {
     device.onPrintFiscalReceipt(async (event, next) => {
       const { order } = event
       const products = []
+      let lastProduct = null
       // const discount = order.subtotal - order.total + (order.platformDiscount || 0)
 
       for (const i in Object.values(order.products)) {
         const product = await Poster.products.getFullName(order.products[i])
+        lastProduct = product
+        console.log('product', product)
         const model = await Poster.products.get(product.id)
 
         // // If discount applied to the order we should calculate price with discount
@@ -116,6 +119,7 @@ class CheckboxApp extends React.Component {
 
       const payments = []
       const payedOther = order.payedCert || order.payedEwallet || order.payedThirdParty
+      console.log('order', order)
 
       if (order.payedCard) {
         payments.push({ type: 'CARD', value: 0, label: 'Картка' })
@@ -126,13 +130,13 @@ class CheckboxApp extends React.Component {
       }
 
       if (payedOther) {
-        payments.push({ type: 'CASHLESS', value: Math.round(parseFloat(order.payedOther) * 100), label: 'Інше' })
+        payments.push({ type: 'CASHLESS', value: Math.round(parseFloat(payedOther) * 100), label: (order.payedCert ? 'Сертифікат' : 'Інше')})
       }
 
       const payload = {
         cashier_name: this.state.cashier && this.state.cashier.full_name,
         goods: products,
-        payments,
+        payments, 
         rounding: Boolean(order.roundSum)
       }
 
@@ -150,10 +154,16 @@ class CheckboxApp extends React.Component {
           if (answer && Number(answer.code) !== 201) {
             console.log("Sell error:", answer)
             const { message, detail } = JSON.parse(answer.result)
-            this.setState({ reportData: null, textPreview: false, showError: true, error: message + JSON.stringify(detail) })
+            this.setState({ 
+              reportData: null, 
+              textPreview: false, 
+              showError: true, 
+              error: message + ((detail) ? JSON.stringify(detail) : ""),
+              debugInfo1: JSON.stringify(lastProduct),
+              debugInfo2: JSON.stringify(payload) })
             Poster.interface.popup({
               width: 700,
-              height: 300,
+              height: 400,
               title: `Помилка фіскалізації`
             })
 
@@ -645,7 +655,9 @@ class CheckboxApp extends React.Component {
       cashRegister,
       textPreview,
       reportData,
-      showError
+      showError,
+      debugInfo1,
+      debugInfo2
     } = this.state
 
     if (textPreview) {
@@ -671,10 +683,12 @@ class CheckboxApp extends React.Component {
 
     if (showError) {
       return (
-        <div>
-          <div className="alert alert-danger" role="alert">
+        <div >
+          <div className="alert alert-danger" role="alert" style={{ overflow: "scroll", maxHeight: 200}}>
               {error}
             </div>
+            {debugInfo1 && <pre>{debugInfo1}</pre> }
+            {debugInfo2 && <pre>{debugInfo2}</pre> }
         </div>
       )
     }
