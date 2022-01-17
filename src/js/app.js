@@ -17,14 +17,36 @@ class CheckboxApp extends React.Component {
   constructor(props) {
     super(props)
     console.log('Checkbox app, version ', version)
+    console.log('Poster settings ', Poster.settings)
 
     let licenseKey
     let pinCode
-    const extras = Poster.settings['extras']
-    console.log('Checkbox extras ', extras)
+    let extras = Poster.settings['spotExtras']
+    console.log('Checkbox spot extras ', extras)
     if (extras) {
       licenseKey = extras['licenseKey']
       pinCode = extras['pinCode']
+    }
+    else {
+      extras = Poster.settings["extras"];
+      if (extras) {
+        Poster.makeApiRequest(
+          "application.setEntityExtras",
+          {
+            method: 'post',
+            data: {
+              entity_type: 'spot',
+              entity_id: Poster.settings["spotId"],
+              extras: extras
+            }
+          },
+          (response) => {
+            licenseKey = extras['licenseKey']
+            pinCode = extras['pinCode']
+            console.log("Checkbox spot extras ", response);
+          }
+        );
+      }
     }
 
     // state
@@ -62,6 +84,7 @@ class CheckboxApp extends React.Component {
       const { order } = event
       const products = []
       let lastProduct = null
+      let lastModel = null
       // const discount = order.subtotal - order.total + (order.platformDiscount || 0)
 
       for (const i in Object.values(order.products)) {
@@ -69,6 +92,8 @@ class CheckboxApp extends React.Component {
         lastProduct = product
         console.log('product', product)
         const model = await Poster.products.get(product.id)
+        lastModel = model
+        console.log('model', model)
 
         // // If discount applied to the order we should calculate price with discount
         // if (product.promotionPrice !== undefined) {
@@ -105,13 +130,14 @@ class CheckboxApp extends React.Component {
         //   product.taxName = model.taxName
         // }
 
+        const price = model.price || product.price
         products.push({
           good: {
             barcode: model.barcode,
             name: product.name,
             code: product.id,
             tax: [model.fiscalProgram],
-            price: Math.round(parseFloat(model.price) * 100)
+            price: Math.round(parseFloat(price) * 100)
           },
           quantity: Math.round(parseFloat(product.count) * 1000)
         })
@@ -119,14 +145,13 @@ class CheckboxApp extends React.Component {
 
       const payments = []
       const payedOther = order.payedCert || order.payedEwallet || order.payedThirdParty
-      console.log('order', order)
 
       if (order.payedCard) {
-        payments.push({ type: 'CARD', value: 0, label: 'Картка' })
+        payments.push({ type: 'CARD', value: Math.round(parseFloat(order.payedCard) * 100), label: 'Картка' })
       }
 
       if (order.payedCash) {
-        payments.push({ type: 'CASH', value: Math.round(parseFloat(order.payedCashFull) * 100) })
+        payments.push({ type: 'CASH', value: Math.round(parseFloat(order.payedCashFull || order.payedCash) * 100) })
       }
 
       if (payedOther) {
@@ -152,29 +177,54 @@ class CheckboxApp extends React.Component {
         },
         (answer) => {
           if (answer && Number(answer.code) !== 201) {
-            console.log("Sell error:", answer)
-            const { message, detail } = JSON.parse(answer.result)
-            this.setState({ 
-              reportData: null, 
-              textPreview: false, 
-              showError: true, 
-              error: message + ((detail) ? JSON.stringify(detail) : ""),
-              debugInfo1: JSON.stringify(lastProduct),
-              debugInfo2: JSON.stringify(payload) })
-            Poster.interface.popup({
-              width: 700,
-              height: 400,
-              title: `Помилка фіскалізації`
-            })
-
+            console.log("Sell error:", answer);
+            const { message, detail } = JSON.parse(answer.result);
             Poster.interface.showNotification({
-              title: 'Помилка',
-              message: message
-            })
+              title: "Помилка",
+              message: message,
+            });
+            let stateData = {
+              reportData: null,
+              textPreview: false,
+              showError: true,
+              error: message + (detail ? JSON.stringify(detail) : ""),
+              debugInfo1: JSON.stringify(lastProduct),
+              debugInfo2: JSON.stringify(lastModel),
+              debugInfo3: JSON.stringify(payload),
+            };
+            Poster.makeRequest(
+              "https://paste.checkbox.in.ua/documents",
+              {
+                method: "post",
+                data: JSON.stringify({
+                  PAYLOAD: payload,
+                  ORDER: order,
+                  ERROR: answer,
+                }),
+              },
+              (res) => {
+                console.log(res);
+                if (res && Number(res.code) == 200) {
+                  let data = JSON.parse(res.result);
+                  const key = data["key"];
+                  stateData.debugInfo1 = null;
+                  stateData.debugInfo2 = null;
+                  stateData.debugInfo3 = null;
+                  stateData.pastebinLink = `https://paste.checkbox.in.ua/${key}`;
+                }
+
+                this.setState(stateData);
+                Poster.interface.popup({
+                  width: 700,
+                  height: 500,
+                  title: `Помилка фіскалізації`,
+                });
+              }
+            );
           } else {
-            const data = JSON.parse(answer.result)
-            console.log('Receipt data', data)
-            setTimeout(() => this.getReceiptView(data.id), 500)
+            const data = JSON.parse(answer.result);
+            console.log("Receipt data", data);
+            setTimeout(() => this.getReceiptView(data.id), 500);
           }
         }
       )
@@ -192,7 +242,15 @@ class CheckboxApp extends React.Component {
     })
 
     device.onPrintXReport(async (event, next) => {
-      await this.getXReport()
+      try {
+        await this.getXReport()
+      }
+      catch(e){
+        Poster.interface.showNotification({
+          title: 'Помилка',
+          message: e
+        })
+      }
       next({
         errorCode: 0,
         success: true
@@ -342,13 +400,13 @@ class CheckboxApp extends React.Component {
   getToken = () => {
     if(this.state.token) 
       return this.state.token
-    const extras = Poster.settings['extras'] || []
+    const extras = Poster.settings['spotExtras'] || Poster.settings['extras'] || []
     
     return extras['token']
   }
 
   getLicenseKey = () => {
-    const extras = Poster.settings['extras'] || []
+    const extras = Poster.settings['spotExtras'] || Poster.settings['extras'] || []
     return extras['licenseKey']
   }
 
@@ -450,7 +508,7 @@ class CheckboxApp extends React.Component {
         } else {
           const data = JSON.parse(answer.result)
           console.log('New shift', data)
-          this.getReportById(data.id)
+          //this.getXReport()
         }
       }
     )
@@ -593,7 +651,8 @@ class CheckboxApp extends React.Component {
             {
               method: 'post',
               data: {
-                entity_type: 'settings',
+                entity_type: 'spot',
+                entity_id: Poster.settings["spotId"],
                 extras: {
                   token: access_token,
                   pinCode: pinCode,
@@ -603,7 +662,7 @@ class CheckboxApp extends React.Component {
               }
             },
             (response) => {
-              const extras = Poster.settings['extras']
+              const extras = Poster.settings['spotExtras']
               console.log('Checkbox extras ', response, extras)
               this.getCashierInfo()
             }
@@ -657,7 +716,9 @@ class CheckboxApp extends React.Component {
       reportData,
       showError,
       debugInfo1,
-      debugInfo2
+      debugInfo2,
+      debugInfo3,
+      pastebinLink
     } = this.state
 
     if (textPreview) {
@@ -689,6 +750,8 @@ class CheckboxApp extends React.Component {
             </div>
             {debugInfo1 && <pre>{debugInfo1}</pre> }
             {debugInfo2 && <pre>{debugInfo2}</pre> }
+            {debugInfo3 && <pre>{debugInfo3}</pre> }
+            {pastebinLink && <a target="_blank" href={pastebinLink}>{pastebinLink}</a>}
         </div>
       )
     }
