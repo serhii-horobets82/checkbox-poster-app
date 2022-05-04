@@ -1,48 +1,47 @@
-import '../css/main.less'
-import '../css/styles.css'
-import React from 'react'
-import ReactDOM from 'react-dom'
-import { version } from '../../package.json'
+import "../css/main.less";
+import "../css/styles.css";
+import React from "react";
+import ReactDOM from "react-dom";
+import { version } from "../../package.json";
 
-import 'babel-polyfill'
+import "babel-polyfill";
 
-const checkboxApi = 'https://api.checkbox.ua'
+const checkboxApi = "https://api.checkbox.ua";
 
 const defaultHeaders = [
   `X-Client-Name:Poster app`,
-  `X-Client-Version:${version}`
-]
+  `X-Client-Version:${version}`,
+];
 
 class CheckboxApp extends React.Component {
   constructor(props) {
-    super(props)
-    console.log('Checkbox app, version ', version)
-    console.log('Poster settings ', Poster.settings)
+    super(props);
+    console.log("Checkbox app, version ", version);
+    console.log("Poster settings ", Poster.settings);
 
-    let licenseKey
-    let pinCode
-    let extras = Poster.settings['spotExtras']
-    console.log('Checkbox spot extras ', extras)
+    let licenseKey;
+    let pinCode;
+    let extras = Poster.settings["spotExtras"];
+    console.log("Checkbox spot extras ", extras);
     if (extras) {
-      licenseKey = extras['licenseKey']
-      pinCode = extras['pinCode']
-    }
-    else {
+      licenseKey = extras["licenseKey"];
+      pinCode = extras["pinCode"];
+    } else {
       extras = Poster.settings["extras"];
       if (extras) {
         Poster.makeApiRequest(
           "application.setEntityExtras",
           {
-            method: 'post',
+            method: "post",
             data: {
-              entity_type: 'spot',
+              entity_type: "spot",
               entity_id: Poster.settings["spotId"],
-              extras: extras
-            }
+              extras: extras,
+            },
           },
           (response) => {
-            licenseKey = extras['licenseKey']
-            pinCode = extras['pinCode']
+            licenseKey = extras["licenseKey"];
+            pinCode = extras["pinCode"];
             console.log("Checkbox spot extras ", response);
           }
         );
@@ -59,51 +58,62 @@ class CheckboxApp extends React.Component {
       cashRegister: null,
       reportData: null,
       textPreview: false,
+      receiptUrl: null,
       token: null,
-      showError: false
-    }
+      showError: false,
+    };
   }
 
   initDevice = async () => {
-    const devices = await Poster.devices.getAll({ type: 'fiscalPrinter' })
-    console.log('devices', devices)
-    let device
+    const devices = await Poster.devices.getAll({ type: "fiscalPrinter" });
+    console.log("devices", devices);
+    let device;
     if (devices && devices.length > 0) {
-      console.log('Checkbox devices', devices)
-      device = devices[0]
+      console.log("Checkbox devices", devices);
+      device = devices[0];
     } else {
       // create new
       device = await Poster.devices.create({
-        deviceClass: 'platformOnlineFiscal'
-      })
+        deviceClass: "platformOnlineFiscal",
+      });
     }
-    device.setOnline()
-    device.setDefault()
+    device.setOnline();
+    device.setDefault();
+
+    ////
+    // this.setState({ reportData: "Hello", receiptUrl: "https://api.checkbox.ua/api/v1/receipts/483bb5a1-3112-4b1e-b1b8-d9f1e41896cf/png", textPreview: true, showError: false })
+    // Poster.interface.popup({
+    //   width: 500,
+    //   height: 600,
+    //   title: `Друк чеку`
+    // })
+    ////
 
     device.onPrintFiscalReceipt(async (event, next) => {
-      const { order } = event
-      const products = []
-      let lastProduct = null
-      let lastModel = null
-      // const discount = order.subtotal - order.total + (order.platformDiscount || 0)
+      const { order } = event;
+      const products = [];
+      let lastProduct = null;
+      let lastModel = null;
+      const discount =
+        order.subtotal - order.total + (order.platformDiscount || 0);
 
       for (const i in Object.values(order.products)) {
-        const product = await Poster.products.getFullName(order.products[i])
-        lastProduct = product
-        console.log('product', product)
-        const model = await Poster.products.get(product.id)
-        lastModel = model
-        console.log('model', model)
+        const product = await Poster.products.getFullName(order.products[i]);
+        lastProduct = product;
+        console.log("product", product);
+        const model = await Poster.products.get(product.id);
+        lastModel = model;
+        console.log("model", model);
 
         // // If discount applied to the order we should calculate price with discount
-        // if (product.promotionPrice !== undefined) {
-        //   product.price = product.promotionPrice
-        // }
+        if (product.promotionPrice) {
+          product.price = product.promotionPrice;
+        }
         //
-        // // Вычитаем скидку на заказ
-        // product.price -= (model.price / order.subtotal) * discount
-        // product.tax = 0
-        //
+        // Вычитаем скидку на заказ
+        product.price -= (model.price / order.subtotal) * discount;
+        product.tax = 0;
+
         // // Here we will calculate total tax value, but product price will be only for 1 item
         // // E.g. for 2 donuts price field will contain 1 donut price and tax field will contain whole taxes sum for 2 donuts
         //
@@ -130,50 +140,68 @@ class CheckboxApp extends React.Component {
         //   product.taxName = model.taxName
         // }
 
-        const price = model.price || product.price
+        let price = product.price;
+        if (!price) {
+          price = model.price;
+        }
+
         products.push({
           good: {
             barcode: model.barcode,
             name: product.name,
             code: product.id,
             tax: [model.fiscalProgram],
-            price: Math.round(parseFloat(price) * 100)
+            price: Math.round(parseFloat(price) * 100),
           },
-          quantity: Math.round(parseFloat(product.count) * 1000)
-        })
+          quantity: Math.round(parseFloat(product.count) * 1000),
+        });
       }
 
-      const payments = []
-      const payedOther = order.payedCert || order.payedEwallet || order.payedThirdParty
+      const payments = [];
+      const payedOther =
+        order.payedCert || order.payedEwallet || order.payedThirdParty;
 
       if (order.payedCard) {
-        payments.push({ type: 'CARD', value: Math.round(parseFloat(order.payedCard) * 100), label: 'Картка' })
+        payments.push({
+          type: "CARD",
+          value: Math.round(parseFloat(order.payedCard) * 100),
+          label: "Картка",
+        });
       }
 
       if (order.payedCash) {
-        payments.push({ type: 'CASH', value: Math.round(parseFloat(order.payedCashFull || order.payedCash) * 100) })
+        payments.push({
+          type: "CASH",
+          value: Math.round(
+            parseFloat(order.payedCashFull || order.payedCash) * 100
+          ),
+        });
       }
 
       if (payedOther) {
-        payments.push({ type: 'CASHLESS', value: Math.round(parseFloat(payedOther) * 100), label: (order.payedCert ? 'Сертифікат' : 'Інше')})
+        payments.push({
+          type: "CASHLESS",
+          value: Math.round(parseFloat(payedOther) * 100),
+          label: order.payedCert ? "Сертифікат" : "Інше",
+        });
       }
 
       const payload = {
         cashier_name: this.state.cashier && this.state.cashier.full_name,
         goods: products,
-        payments, 
-        rounding: Boolean(order.roundSum)
-      }
+        payments,
+        rounding: Boolean(order.roundSum),
+      };
 
-      console.log('Receipt payload', payload)
+      console.log("Receipt payload", payload);
 
-      const token = this.getToken()
+      const token = this.getToken();
       Poster.makeRequest(
         `${this.getApiServer()}/api/v1/receipts/sell`,
         {
           headers: defaultHeaders.concat([`Authorization: Bearer ${token}`]),
-          method: 'post',
-          data: JSON.stringify(payload)
+          method: "post",
+          data: JSON.stringify(payload),
         },
         (answer) => {
           if (answer && Number(answer.code) !== 201) {
@@ -186,6 +214,7 @@ class CheckboxApp extends React.Component {
             let stateData = {
               reportData: null,
               textPreview: false,
+              receiptUrl: null,
               showError: true,
               error: message + (detail ? JSON.stringify(detail) : ""),
               debugInfo1: JSON.stringify(lastProduct),
@@ -199,6 +228,7 @@ class CheckboxApp extends React.Component {
                 data: JSON.stringify({
                   PAYLOAD: payload,
                   ORDER: order,
+                  MODEL: lastModel,
                   ERROR: answer,
                 }),
               },
@@ -224,46 +254,49 @@ class CheckboxApp extends React.Component {
           } else {
             const data = JSON.parse(answer.result);
             console.log("Receipt data", data);
-            setTimeout(() => this.getReceiptView(data.id), 500);
+            setTimeout(() => this.getReceiptView(data.id), 1000);
           }
         }
-      )
+      );
 
       next({
         errorCode: 0,
-        success: true
-      })
-    })
+        success: true,
+      });
+    });
     device.onPrintNonFiscal((event) => {
-      console.log('onPrintNonFiscal', event)
-    })
+      console.log("onPrintNonFiscal", event);
+    });
     device.onPrintCashFlow((event) => {
-      console.log('onPrintCashFlow', event)
-    })
+      console.log("onPrintCashFlow", event);
+      next({
+        errorCode: 0,
+        success: true,
+      });
+    });
 
     device.onPrintXReport(async (event, next) => {
       try {
-        await this.getXReport()
-      }
-      catch(e){
+        await this.getXReport();
+      } catch (e) {
         Poster.interface.showNotification({
-          title: 'Помилка',
-          message: e
-        })
+          title: "Помилка",
+          message: e,
+        });
       }
       next({
         errorCode: 0,
-        success: true
-      })
-    })
+        success: true,
+      });
+    });
 
     device.onPrintZReport(async (event, next) => {
-      await this.getZReport()
+      await this.getZReport();
       next({
         errorCode: 0,
-        success: true
-      })
-    })
+        success: true,
+      });
+    });
     /*
     device.onPrintPeriodicReport((event) => {
       console.log("onPrintPeriodicReport", event);
@@ -314,396 +347,448 @@ class CheckboxApp extends React.Component {
       console.log("onIsFiscalBlocked", event);
     });*/
 
-    this.setState({ device: device })
-  }
+    this.setState({ device: device });
+  };
 
   async componentDidMount() {
-    await this.initDevice()
+    await this.initDevice();
 
     Poster.interface.showApplicationIconAt({
-      functions: 'Checkbox пРРО'
-    })
+      functions: "Checkbox пРРО",
+    });
 
-    Poster.on('applicationIconClicked', this.onIconClick)
-    Poster.on('shiftOpen', this.onShiftOpen)
-    Poster.on('shiftClose', this.onShiftClose)
+    Poster.on("applicationIconClicked", this.onIconClick);
+    Poster.on("shiftOpen", this.onShiftOpen);
+    Poster.on("shiftClose", this.onShiftClose);
   }
 
-  onShiftOpen = () => {
-    console.log('Open shift')
-    this.openShift()
-  }
+  onShiftOpen = (data) => {
+    console.log("Open shift", data);
+    this.openShift(data);
+  };
 
-  onShiftClose = () => {
-    console.log('Close shift')
-  }
+  onShiftClose = (data) => {
+    console.log("Close shift", data);
+  };
 
   beforeOrderClose = (data, next) => {
-    const { order } = data
-    console.log('beforeOrderClose', data)
-    next()
-  }
+    const { order } = data;
+    console.log("beforeOrderClose", data);
+    next();
+  };
 
   afterOrderClose = async (data, next) => {
-    console.log('afterOrderClose', data)
-    const { order } = data
-    const products = []
+    console.log("afterOrderClose", data);
+    const { order } = data;
+    const products = [];
     const discount =
-      order.subtotal - order.total + (order.platformDiscount || 0)
+      order.subtotal - order.total + (order.platformDiscount || 0);
 
     for (const i in Object.values(order.products)) {
-      const product = await Poster.products.getFullName(order.products[i])
-      const model = await Poster.products.get(product.id)
-      console.log('product', product)
-      console.log('model', model)
+      const product = await Poster.products.getFullName(order.products[i]);
+      const model = await Poster.products.get(product.id);
+      console.log("product", product);
+      console.log("model", model);
       // If discount applied to the order we should calculate price with discount
       if (product.promotionPrice !== undefined) {
-        product.price = product.promotionPrice
+        product.price = product.promotionPrice;
       }
 
       // Вычитаем скидку на заказ
-      product.price -= (product.price / order.subtotal) * discount
-      product.tax = 0
+      product.price -= (product.price / order.subtotal) * discount;
+      product.tax = 0;
 
       // Here we will calculate total tax value, but product price will be only for 1 item
       // E.g. for 2 donuts price field will contain 1 donut price and tax field will contain whole taxes sum for 2 donuts
 
       // Calculate Sales Tax
       if (model.taxType === 1 && model.taxValue) {
-        product.tax = (product.price * model.taxValue) / 100
+        product.tax = (product.price * model.taxValue) / 100;
       }
 
       // Calculate VAT. VAT already included in price so we have to subtract it
       if (model.taxType === 3 && model.taxValue) {
         product.tax =
-          product.price - product.price / (1 + model.taxValue / 100)
-        product.price -= product.tax
+          product.price - product.price / (1 + model.taxValue / 100);
+        product.price -= product.tax;
       }
 
       // Calculate tax on turnover
       if (model.taxType === 2 && model.taxValue) {
-        product.tax = (product.price * model.taxValue) / 100
-        product.price -= product.tax
+        product.tax = (product.price * model.taxValue) / 100;
+        product.price -= product.tax;
       }
 
       if (product.tax !== undefined) {
-        product.tax *= product.count
-        product.taxName = model.taxName
+        product.tax *= product.count;
+        product.taxName = model.taxName;
       }
 
-      products.push(product)
+      products.push(product);
     }
 
-    console.log('products', products)
-  }
+    console.log("products", products);
+  };
 
   getToken = () => {
-    if(this.state.token) 
-      return this.state.token
-    const extras = Poster.settings['spotExtras'] || Poster.settings['extras'] || []
-    
-    return extras['token']
-  }
+    if (this.state.token) return this.state.token;
+    const extras =
+      Poster.settings["spotExtras"] || Poster.settings["extras"] || [];
+
+    return extras["token"];
+  };
 
   getLicenseKey = () => {
-    const extras = Poster.settings['spotExtras'] || Poster.settings['extras'] || []
-    return extras['licenseKey']
-  }
+    const extras =
+      Poster.settings["spotExtras"] || Poster.settings["extras"] || [];
+    return extras["licenseKey"];
+  };
 
   onIconClick = async () => {
-    this.getCashierInfo()
-    this.getCashRegisterInfo()
-    this.setState({ reportData: null, textPreview: false, showError: false, error: null })
+    this.getCashierInfo();
+    this.getCashRegisterInfo();
+    this.setState({
+      reportData: null,
+      textPreview: false,
+      receiptUrl: null,
+      showError: false,
+      error: null,
+    });
     Poster.interface.popup({
       width: 700,
       height: 700,
-      title: `Checkbox app (${version})`
-    })
-  }
+      title: `Checkbox app (${version})`,
+    });
+  };
 
   refresh = async () => {
-    await this.initDevice()
-  }
+    await this.initDevice();
+  };
 
   getApiServer = () => {
-    return checkboxApi
-  }
+    return checkboxApi;
+  };
 
   getXReport = async () => {
-    const token = this.getToken()
-    if (!token) return
+    const token = this.getToken();
+    if (!token) return;
 
     Poster.makeRequest(
       `${this.getApiServer()}/api/v1/reports`,
       {
         headers: defaultHeaders.concat([`Authorization: Bearer ${token}`]),
-        method: 'post'
+        method: "post",
       },
       (answer) => {
         if (answer && Number(answer.code) !== 201) {
-          const { message } = JSON.parse(answer.result)
-          this.setState({ error: message })
+          const { message } = JSON.parse(answer.result);
+          this.setState({ error: message });
           Poster.interface.showNotification({
-            title: 'Помилка',
-            message: message
-          })
+            title: "Помилка",
+            message: message,
+          });
         } else {
-          const data = JSON.parse(answer.result)
-          console.log('X report', data.id)
-          this.getReportById(data.id)
+          const data = JSON.parse(answer.result);
+          console.log("X report", data.id);
+          this.getReportById(data.id);
         }
       }
-    )
-  }
+    );
+  };
 
   getZReport = async () => {
-    const token = this.getToken()
-    if (!token) return
+    const token = this.getToken();
+    if (!token) return;
 
     Poster.makeRequest(
       `${this.getApiServer()}/api/v1/shifts/close`,
       {
         headers: defaultHeaders.concat([`Authorization: Bearer ${token}`]),
-        method: 'post'
+        method: "post",
       },
       (answer) => {
-        console.log('Z report', answer)
+        console.log("Z report", answer);
         if (answer && Number(answer.code) !== 202) {
-          const { message } = JSON.parse(answer.result)
-          this.setState({ error: message })
+          const { message } = JSON.parse(answer.result);
+          this.setState({ error: message });
           Poster.interface.showNotification({
-            title: 'Помилка',
-            message: message
-          })
+            title: "Помилка",
+            message: message,
+          });
         } else {
-          const data = JSON.parse(answer.result)
-          console.log('Z report', data)
-          this.getReportById(data.z_report.id)
+          const data = JSON.parse(answer.result);
+          console.log("Z report", data);
+          this.getReportById(data.z_report.id);
         }
       }
-    )
-  }
+    );
+  };
 
-  openShift = async () => {
-    const licenseKey = this.getLicenseKey()
-    if (!licenseKey) return
-    const token = this.getToken()
-    if (!token) return
+  openShift = async (data) => {
+    const licenseKey = this.getLicenseKey();
+    if (!licenseKey) return;
+    const token = this.getToken();
+    if (!token) return;
 
     Poster.makeRequest(
       `${this.getApiServer()}/api/v1/shifts`,
       {
-        headers: defaultHeaders.concat([`X-License-Key: ${licenseKey}`]).concat([`Authorization: Bearer ${token}`]),
-        method: 'post'
+        headers: defaultHeaders
+          .concat([`X-License-Key: ${licenseKey}`])
+          .concat([`Authorization: Bearer ${token}`]),
+        method: "post",
       },
       (answer) => {
-        console.log('Open shift', answer)
+        console.log("Open shift", answer);
         if (answer && Number(answer.code) !== 202) {
-          const { message } = JSON.parse(answer.result)
-          this.setState({ error: message })
+          const { message } = JSON.parse(answer.result);
+          this.setState({ error: message });
           Poster.interface.showNotification({
-            title: 'Помилка',
-            message: message
-          })
+            title: "Помилка",
+            message: message,
+          });
         } else {
-          const data = JSON.parse(answer.result)
-          console.log('New shift', data)
+          const data = JSON.parse(answer.result);
+          console.log("New shift", data);
           //this.getXReport()
         }
       }
-    )
-  }
+    );
+  };
 
   getReportById = async (id) => {
     Poster.makeRequest(
       `${this.getApiServer()}/api/v1/reports/${id}/text`,
       {
         headers: defaultHeaders,
-        method: 'get'
+        method: "get",
       },
       (answer) => {
         if (answer && Number(answer.code) !== 200) {
-          const { message } = JSON.parse(answer.result)
-          this.setState({ error: message })
+          const { message } = JSON.parse(answer.result);
+          this.setState({ error: message });
           Poster.interface.showNotification({
-            title: 'Ошибка',
-            message: message
-          })
+            title: "Ошибка",
+            message: message,
+          });
         } else {
-          console.log('Report data', answer.result)
-          this.setState({ reportData: answer.result, textPreview: true, showError: false })
+          console.log("Report data", answer.result);
+          this.setState({
+            reportData: answer.result,
+            textPreview: true,
+            receiptFormat: "text",
+            receiptUrl: null,
+            showError: false,
+          });
           Poster.interface.popup({
             width: 400,
             height: 600,
-            title: `Друк звіту`
-          })
+            title: `Друк звіту`,
+          });
         }
       }
-    )
-  }
+    );
+  };
 
   getReceiptView = async (id) => {
+    const receiptUrl = `${this.getApiServer()}/api/v1/receipts/${id}/png`;
+    console.log(
+      "Receipt url",
+      `${this.getApiServer()}/api/v1/receipts/${id}/text`
+    );
     Poster.makeRequest(
       `${this.getApiServer()}/api/v1/receipts/${id}/text`,
       {
         headers: defaultHeaders,
-        method: 'get'
+        method: "get",
       },
       (answer) => {
         if (answer && Number(answer.code) !== 200) {
-          const { message } = JSON.parse(answer.result)
-          this.setState({ error: message })
+          console.log("getReceiptView", answer);
+          if (Number(answer.code) === 424) {
+            setTimeout(() => this.getReceiptView(id), 1000);
+            return;
+          }
+          const { message } = JSON.parse(answer.result);
+          this.setState({ error: message });
           Poster.interface.showNotification({
-            title: 'Ошибка',
-            message: message
-          })
+            title: "Ошибка",
+            message: message,
+          });
         } else {
-          console.log('Receipt view data', answer)
-          this.setState({ reportData: answer.result, textPreview: true, showError: false })
+          this.setState({
+            reportData: answer.result,
+            receiptUrl: receiptUrl,
+            receiptFormat: "text",
+            textPreview: true,
+            showError: false,
+          });
           Poster.interface.popup({
-            width: 400,
+            width: 500,
             height: 600,
-            title: `Друк чеку`
-          })
+            title: `Друк чеку`,
+          });
         }
       }
-    )
-  }
+    );
+  };
 
   getCashierInfo = () => {
-    const token = this.getToken()
-    if (!token) return
+    const token = this.getToken();
+    if (!token) return;
 
     Poster.makeRequest(
       `${this.getApiServer()}/api/v1/cashier/me`,
       {
         headers: defaultHeaders.concat([`Authorization: Bearer ${token}`]),
-        method: 'get'
+        method: "get",
       },
       (answer) => {
         if (answer && Number(answer.code) !== 200) {
-          const { message } = JSON.parse(answer.result)
-          this.setState({ error: message })
+          const { message } = JSON.parse(answer.result);
+          this.setState({ error: message });
           Poster.interface.showNotification({
-            title: 'Ошибка',
-            message: message
-          })
+            title: "Ошибка",
+            message: message,
+          });
         } else {
-          const data = JSON.parse(answer.result)
-          console.log('Cashier info', data)
-          this.setState({ cashier: data })
+          const data = JSON.parse(answer.result);
+          console.log("Cashier info", data);
+          this.setState({ cashier: data });
         }
       }
-    )
-  }
+    );
+  };
 
   getCashRegisterInfo = () => {
-    const licenseKey = this.getLicenseKey()
-    if (!licenseKey) return
+    const licenseKey = this.getLicenseKey();
+    if (!licenseKey) return;
 
     Poster.makeRequest(
       `${this.getApiServer()}/api/v1/cash-registers/info`,
       {
         headers: defaultHeaders.concat([`X-License-Key: ${licenseKey}`]),
-        method: 'get'
+        method: "get",
       },
       (answer) => {
         if (answer && Number(answer.code) !== 200) {
-          const { message } = JSON.parse(answer.result)
-          this.setState({ error: message })
+          const { message } = JSON.parse(answer.result);
+          this.setState({ error: message });
           Poster.interface.showNotification({
-            title: 'Ошибка',
-            message: message
-          })
+            title: "Ошибка",
+            message: message,
+          });
         } else {
-          const data = JSON.parse(answer.result)
-          console.log('Cash register info', data)
-          this.setState({ cashRegister: data })
+          const data = JSON.parse(answer.result);
+          console.log("Cash register info", data);
+          this.setState({ cashRegister: data });
         }
       }
-    )
-  }
+    );
+  };
 
   auth = async (e) => {
-    e.preventDefault()
-    const { licenseKey, pinCode } = this.state
+    e.preventDefault();
+    const { licenseKey, pinCode } = this.state;
     // Auth
     Poster.makeRequest(
       `${this.getApiServer()}/api/v1/cashier/signinPinCode`,
       {
         headers: defaultHeaders.concat([`X-License-Key: ${licenseKey}`]),
-        method: 'post',
+        method: "post",
         processData: false,
-        data: JSON.stringify({ pin_code: pinCode })
+        data: JSON.stringify({ pin_code: pinCode }),
       },
       (answer) => {
-        console.log('Checkbox response', answer)
+        console.log("Checkbox response", answer);
         if (answer && Number(answer.code) !== 200) {
-          const { message } = JSON.parse(answer.result)
-          this.setState({ error: message, cashier: null })
+          const { message } = JSON.parse(answer.result);
+          this.setState({ error: message, cashier: null });
         } else {
-          const { access_token } = JSON.parse(answer.result)
-          this.setState({ error: null, token: access_token })
+          const { access_token } = JSON.parse(answer.result);
+          this.setState({ error: null, token: access_token });
 
           // save global settings
           Poster.makeApiRequest(
-            'application.setEntityExtras',
+            "application.setEntityExtras",
             {
-              method: 'post',
+              method: "post",
               data: {
-                entity_type: 'spot',
+                entity_type: "spot",
                 entity_id: Poster.settings["spotId"],
                 extras: {
                   token: access_token,
                   pinCode: pinCode,
                   licenseKey: licenseKey,
-                  api: this.getApiServer()
-                }
-              }
+                  api: this.getApiServer(),
+                },
+              },
             },
             (response) => {
-              const extras = Poster.settings['spotExtras']
-              console.log('Checkbox extras ', response, extras)
-              this.getCashierInfo()
+              const extras = Poster.settings["spotExtras"];
+              console.log("Checkbox extras ", response, extras);
+              this.getCashierInfo();
             }
-          )
+          );
         }
       }
-    )
-  }
+    );
+  };
 
   updateInput = (e) => {
-    let { id, value } = e.target
-    this.setState({ [id]: value })
-  }
+    let { id, value } = e.target;
+    this.setState({ [id]: value });
+  };
 
   formatDate = (str) => {
     if (str) {
       return (
         str.substring(8, 10) +
-        '/' +
+        "/" +
         str.substring(5, 7) +
-        '/' +
+        "/" +
         str.substring(0, 4)
-      )
+      );
     }
-    return ''
-  }
+    return "";
+  };
 
   printReport = async () => {
-    let printers = await Poster.devices.getAll({ type: 'printer' })
-    if (!printers || printers.length === 0) {
-      Poster.interface.showNotification({
-        title: 'Помилка',
-        message: 'Не знайдено жодного принтеру для друку'
-      })
+    const { reportData, receiptFormat, receiptUrl } = this.state;
+
+    if (receiptFormat === "png") {
+      console.log("receiptUrl", receiptUrl);
+      var page =
+        "<html><head><script>function step1(){\n" +
+        "setTimeout('step2()', 10);}\n" +
+        "function step2(){window.print();window.close()}\n" +
+        "</scri" +
+        "pt></head><body onload='step1()'>\n" +
+        "<img src='" +
+        receiptUrl +
+        "' /></body></html>";
+      var pwa = window.open("about:blank", "_new");
+      pwa.document.open();
+      pwa.document.write(page);
+      pwa.document.close();
     } else {
-      const { reportData } = this.state
-      console.log('Print content', reportData, printers)
-      let result = await printers[0].printText({ text: reportData })
-      console.log('Print result', result)
+      let printers = await Poster.devices.getAll({ type: "printer" });
+      if (!printers || printers.length === 0) {
+        Poster.interface.showNotification({
+          title: "Помилка",
+          message: "Не знайдено жодного принтеру для друку",
+        });
+      } else {
+        let result = await printers[0].printText({ text: reportData });
+        console.log("Print result", result);
+      }
     }
-  }
+  };
+
+  switchFormat = (e) => {
+    let { id, value } = e.target;
+    this.setState({ receiptFormat: value });
+  };
 
   render() {
     const {
@@ -713,18 +798,55 @@ class CheckboxApp extends React.Component {
       cashier,
       cashRegister,
       textPreview,
+      receiptFormat,
       reportData,
       showError,
       debugInfo1,
       debugInfo2,
       debugInfo3,
-      pastebinLink
-    } = this.state
+      pastebinLink,
+      receiptUrl,
+    } = this.state;
 
     if (textPreview) {
       return (
         <div>
-          <pre style={{ maxHeight: 500 }}>{reportData}</pre>
+          {receiptUrl && (
+            <div className="btn-group">
+              <label class="radio-inline">
+                <input
+                  type="radio"
+                  id="rbText"
+                  name="format"
+                  value="text"
+                  checked={receiptFormat == "text"}
+                  onClick={this.switchFormat}
+                />
+                Текстовий чек
+              </label>
+              <label class="radio-inline">
+                <input
+                  type="radio"
+                  id="rbPng"
+                  name="format"
+                  value="png"
+                  onClick={this.switchFormat}
+                />
+                Графічний чек
+              </label>
+            </div>
+          )}
+          {receiptFormat === "text" && (
+            <pre id="pre" style={{ maxHeight: 500 }}>
+              {reportData}
+            </pre>
+          )}
+          {receiptFormat === "png" && (
+            <div style={{ overflow: "auto", maxHeight: 450 }}>
+              {" "}
+              <img style={{ maxWidth: 400 }} src={receiptUrl} />
+            </div>
+          )}
 
           <div className="footer">
             <div className="row">
@@ -739,21 +861,29 @@ class CheckboxApp extends React.Component {
             </div>
           </div>
         </div>
-      )
+      );
     }
 
     if (showError) {
       return (
-        <div >
-          <div className="alert alert-danger" role="alert" style={{ overflow: "scroll", maxHeight: 200}}>
-              {error}
-            </div>
-            {debugInfo1 && <pre>{debugInfo1}</pre> }
-            {debugInfo2 && <pre>{debugInfo2}</pre> }
-            {debugInfo3 && <pre>{debugInfo3}</pre> }
-            {pastebinLink && <a target="_blank" href={pastebinLink}>{pastebinLink}</a>}
+        <div>
+          <div
+            className="alert alert-danger"
+            role="alert"
+            style={{ overflow: "scroll", maxHeight: 200 }}
+          >
+            {error}
+          </div>
+          {debugInfo1 && <pre>{debugInfo1}</pre>}
+          {debugInfo2 && <pre>{debugInfo2}</pre>}
+          {debugInfo3 && <pre>{debugInfo3}</pre>}
+          {pastebinLink && (
+            <a target="_blank" href={pastebinLink}>
+              {pastebinLink}
+            </a>
+          )}
         </div>
-      )
+      );
     }
 
     return (
@@ -769,9 +899,7 @@ class CheckboxApp extends React.Component {
                 <label style={{ marginTop: 6 }}>API сервер</label>
               </div>
               <div className="col-xs-7">
-                <label style={{ marginTop: 6 }}>
-                  {checkboxApi}
-                </label>
+                <label style={{ marginTop: 6 }}>{checkboxApi}</label>
               </div>
             </div>
             <div className="row">
@@ -823,7 +951,7 @@ class CheckboxApp extends React.Component {
                 </div>
                 <div className="col-xs-4">
                   <h5>
-                    Діє до:{' '}
+                    Діє до:{" "}
                     <label>{this.formatDate(cashier.certificate_end)}</label>
                   </h5>
                 </div>
@@ -883,8 +1011,8 @@ class CheckboxApp extends React.Component {
           </div>
         </div>
       </form>
-    )
+    );
   }
 }
 
-ReactDOM.render(<CheckboxApp />, document.getElementById('app-container'))
+ReactDOM.render(<CheckboxApp />, document.getElementById("app-container"));
